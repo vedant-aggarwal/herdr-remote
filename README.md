@@ -1,4 +1,4 @@
-# mosshy
+# herdi
 
 Mobile interface for [herdr](https://herdr.dev) AI coding agents. Monitor agent status, approve requests, and send responses from your phone.
 
@@ -6,7 +6,7 @@ Mobile interface for [herdr](https://herdr.dev) AI coding agents. Monitor agent 
 
 ```
 ┌─────────────┐     WebSocket      ┌───────────────┐     CLI      ┌───────┐
-│  iOS App    │◄──────────────────►│ mosshy-relay  │◄────────────►│ herdr │
+│  iOS App    │◄──────────────────►│ herdi-relay  │◄────────────►│ herdr │
 │  (SwiftUI)  │     :8375          │  (Python)     │              │       │
 └─────────────┘                    └───────────────┘              └───────┘
                                          ▲
@@ -17,7 +17,7 @@ Mobile interface for [herdr](https://herdr.dev) AI coding agents. Monitor agent 
 ```
 
 - **relay/** — Python daemon that polls herdr, accepts plugin events, and serves a WebSocket
-- **mosshy-ios/** — SwiftUI app that connects via Bonjour or manual IP
+- **herdi-ios/** — SwiftUI app that connects via Bonjour or manual IP
 
 ## Setup
 
@@ -26,7 +26,7 @@ Mobile interface for [herdr](https://herdr.dev) AI coding agents. Monitor agent 
 ```bash
 cd relay
 pip install -r requirements.txt
-python3 mosshy_relay.py
+python3 herdi_relay.py
 
 # Or install as herdr plugin for instant event push:
 herdr plugin link .
@@ -34,9 +34,9 @@ herdr plugin link .
 
 ### iOS App
 
-Open `mosshy-ios/` in Xcode or build with Swift Package Manager. Requires iOS 17+.
+Open `herdi-ios/` in Xcode or build with Swift Package Manager. Requires iOS 17+.
 
-The app auto-discovers the relay via Bonjour (`_mosshy._tcp`), or you can enter the IP manually in Settings.
+The app auto-discovers the relay via Bonjour (`_herdi._tcp`), or you can enter the IP manually in Settings.
 
 ## Features (MVP)
 
@@ -51,6 +51,6 @@ The app auto-discovers the relay via Bonjour (`_mosshy._tcp`), or you can enter 
 To keep the relay running:
 
 ```bash
-cp relay/com.mosshy.relay.plist ~/Library/LaunchAgents/
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.mosshy.relay.plist
+cp relay/com.herdi.relay.plist ~/Library/LaunchAgents/
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.herdi.relay.plist
 ```

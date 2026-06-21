@@ -21,7 +21,7 @@ final class RelayConnection {
     func startBrowsing() {
         let params = NWParameters()
         params.includePeerToPeer = true
-        browser = NWBrowser(for: .bonjour(type: "_mosshy._tcp", domain: nil), using: params)
+        browser = NWBrowser(for: .bonjour(type: "_herdi._tcp", domain: nil), using: params)
         browser?.browseResultsChangedHandler = { [weak self] results, _ in
             guard let result = results.first else { return }
             if case let .service(name, type, domain, _) = result.endpoint {

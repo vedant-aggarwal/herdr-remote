@@ -29,7 +29,7 @@ struct AgentListView: View {
                 }
                 .padding()
             }
-            .navigationTitle("mosshy")
+            .navigationTitle("herdi")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { showSettings = true } label: {

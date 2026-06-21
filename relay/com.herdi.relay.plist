@@ -3,19 +3,19 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.mosshy.relay</string>
+    <string>com.herdi.relay</string>
     <key>ProgramArguments</key>
     <array>
         <string>/usr/bin/python3</string>
-        <string>/Users/apple/Developer/dcolinmorgan/mosshy/relay/mosshy_relay.py</string>
+        <string>/Users/apple/Developer/dcolinmorgan/herdi/relay/herdi_relay.py</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>/tmp/mosshy-relay.log</string>
+    <string>/tmp/herdi-relay.log</string>
     <key>StandardErrorPath</key>
-    <string>/tmp/mosshy-relay.err</string>
+    <string>/tmp/herdi-relay.err</string>
 </dict>
 </plist>

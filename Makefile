@@ -4,10 +4,10 @@ relay-install:
 	pip install -r relay/requirements.txt
 
 relay-run:
-	python3 relay/mosshy_relay.py
+	python3 relay/herdi_relay.py
 
 relay-plugin:
 	herdr plugin link relay/
 
 ios-build:
-	cd mosshy-ios && swift build
+	cd herdi-ios && swift build

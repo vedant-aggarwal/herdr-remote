@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct MosshyApp: App {
+struct HerdiApp: App {
     @State private var relay = RelayConnection()
 
     var body: some Scene {

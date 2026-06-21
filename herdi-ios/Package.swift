@@ -2,11 +2,11 @@
 import PackageDescription
 
 let package = Package(
-    name: "mosshy",
+    name: "herdi",
     platforms: [.iOS(.v17)],
     targets: [
         .executableTarget(
-            name: "mosshy",
+            name: "herdi",
             path: "Sources"
         )
     ]

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Mosshy relay daemon - polls herdr, exposes WebSocket on port 8375, advertises via mDNS."""
+"""Herdi relay daemon - polls herdr, exposes WebSocket on port 8375, advertises via mDNS."""
 import asyncio, json, os, re, signal, socket, subprocess
 
 try:
@@ -141,7 +141,7 @@ def start_mdns():
         import threading
         ip = sock_mod.gethostbyname(sock_mod.gethostname())
         info = ServiceInfo(
-            "_mosshy._tcp.local.", "Mosshy._mosshy._tcp.local.",
+            "_herdi._tcp.local.", "Herdi._herdi._tcp.local.",
             addresses=[sock_mod.inet_aton(ip)], port=WS_PORT,
         )
         zc = Zeroconf()
@@ -163,7 +163,7 @@ async def main():
     asyncio.create_task(poll_loop())
     asyncio.create_task(event_push())
     server = await serve(handle_client, "0.0.0.0", WS_PORT)
-    print(f"mosshy relay listening on ws://0.0.0.0:{WS_PORT}")
+    print(f"herdi relay listening on ws://0.0.0.0:{WS_PORT}")
     stop = loop.create_future()
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, stop.set_result, None)
