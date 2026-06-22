@@ -66,7 +66,19 @@ herdr plugin link .
 
 ### Remote Herdr Instances
 
-Monitor agents running on remote machines via SSH:
+Monitor agents running on remote machines — no SSH required. Install the herdr plugin on each machine:
+
+```bash
+# On the remote machine:
+herdr plugin install dcolinmorgan/herdi/herdr-plugin
+
+# Set your Mac's relay address (Tailscale IP, LAN IP, etc.):
+export HERDI_RELAY_HOST="ws://100.120.17.59:8375"
+```
+
+The plugin pushes status events to your relay instantly on every agent state change. No polling, no SSH, no passwords — just outbound WebSocket from the remote to your Mac.
+
+#### Alternative: SSH polling (if you have SSH access)
 
 ```bash
 # Set comma-separated SSH targets (requires key-based auth)

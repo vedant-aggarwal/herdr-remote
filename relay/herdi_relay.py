@@ -133,17 +133,36 @@ async def event_push():
         event = await event_queue.get()
         pane_id = event.get("pane_id", "")
         status = event.get("status", "")
+        host = event.get("host", "local")
+
         if status == "blocked" and pane_id:
+            # For remote plugin events, we can't read the pane — use what's in the event
             remote = pane_remote_map.get(pane_id)
-            content = read_pane(pane_id, remote=remote)
+            if remote or host == "local":
+                content = read_pane(pane_id, remote=remote)
+            else:
+                content = event.get("prompt", "Agent is blocked")
             options = detect_options(content)
             await broadcast({
                 "type": "blocked", "pane_id": pane_id,
                 "agent": event.get("agent", ""),
                 "project": event.get("project", ""),
-                "host": event.get("host", "local"),
+                "host": host,
                 "prompt": content[:500],
                 "options": options or TOOL_OPTIONS
+            })
+
+        # Always broadcast the status change so clients can update
+        if pane_id and event.get("type") == "agent_event":
+            await broadcast({
+                "type": "agents", "agents": [{
+                    "pane_id": pane_id,
+                    "agent": event.get("agent", ""),
+                    "status": status,
+                    "cwd": event.get("cwd", ""),
+                    "project": event.get("project", ""),
+                    "host": host,
+                }]
             })
 
 
@@ -159,6 +178,9 @@ async def handle_client(ws):
                 pane_id = msg["pane_id"]
                 remote = pane_remote_map.get(pane_id)
                 run_herdr("pane", "send-text", pane_id, msg["text"] + "\n", remote=remote)
+            elif msg.get("type") == "agent_event":
+                # Remote plugin pushed an event — inject into event queue
+                event_queue.put_nowait(msg)
     finally:
         clients.discard(ws)
 
