@@ -5,7 +5,7 @@ Push agent status events from any herdr instance to a central herdi relay for mo
 ## Install
 
 ```bash
-herdr plugin install dcolinmorgan/herdi/herdr-plugin
+herdr plugin install dcolinmorgan/herdr-push
 ```
 
 Or link locally:

@@ -7,7 +7,7 @@ final class Updater {
     static let shared = Updater()
 
     let currentVersion = "0.3.6"
-    let repo = "dcolinmorgan/herdi"
+    let repo = "dcolinmorgan/herdr-remote"
 
     var latestVersion: String?
     var updateAvailable = false

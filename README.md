@@ -1,6 +1,6 @@
-# herdi
+# herdr-remote
 
-Mobile interface for [herdr](https://herdr.dev) AI coding agents. Monitor agent status, approve requests, and send responses from your phone.
+Mobile & desktop interface for [herdr](https://herdr.dev) AI coding agents. Monitor agent status, approve requests, and send responses from your phone, menu bar, terminal, or Telegram.
 
 ## Architecture
 
