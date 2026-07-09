@@ -23,6 +23,7 @@ if not TOKEN:
 # State
 pending: dict[int, str] = {}  # message_id -> pane_id
 agents: list[dict] = []       # current agent list from relay
+prev_statuses: dict[str, str] = {}  # pane_id -> last known status
 relay_connected = False
 send_target: str = ""         # pane_id for next free-text message (set by /send picker)
 
@@ -69,8 +70,10 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/status — relay connection info\n"
         "/read — read last output from an agent\n"
         "/send — send text to an agent\n"
+        "/trust — trust all tools for a blocked agent\n"
         "/interrupt — send Ctrl+C to an agent\n\n"
-        "Reply to any /read or /send message to send text to that agent.\n\n"
+        "Pick an agent from the menu, then type — no reply needed.\n"
+        "You'll get notified when agents block or finish.\n\n"
         f"Chat ID: {update.effective_chat.id}"
     )
 
@@ -219,6 +222,33 @@ async def cmd_send(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Failed: {e}")
 
 
+async def cmd_trust(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Handle /trust [project] — send 'trust, always allow' to a blocked agent."""
+    args = ctx.args
+    blocked = [a for a in agents if a.get("status") == "blocked"]
+
+    if not blocked:
+        await update.message.reply_text("No blocked agents.")
+        return
+
+    if not args:
+        keyboard = [[InlineKeyboardButton(
+            f"{a['project']} ({a['agent']})",
+            callback_data=json.dumps({"action": "trust", "pane_id": a["pane_id"]})
+        )] for a in blocked[:8]]
+        await update.message.reply_text("Trust which agent?", reply_markup=InlineKeyboardMarkup(keyboard))
+        return
+
+    query = " ".join(args).lower()
+    match = next((a for a in blocked if query in a.get("project", "").lower() or query in a.get("agent", "").lower()), None)
+    if not match:
+        await update.message.reply_text(f"No blocked agent matching '{query}'.")
+        return
+
+    await send_to_relay(match["pane_id"], "trust, always allow")
+    await update.message.reply_text(f"Trusted {match['project']} (always allow)")
+
+
 # --- Callback handler (buttons) ---
 
 async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -252,6 +282,12 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         send_target = data["pane_id"]
         agent_name = next((a['project'] for a in agents if a['pane_id'] == data['pane_id']), '?')
         await query.message.reply_text(f"Ready. Type your message — it will be sent to {agent_name}.")
+        return
+
+    if action == "trust":
+        await send_to_relay(data["pane_id"], "trust, always allow")
+        agent_name = next((a['project'] for a in agents if a['pane_id'] == data['pane_id']), '?')
+        await query.message.reply_text(f"Trusted {agent_name} (always allow)")
         return
 
     # Default: respond to blocked agent
@@ -336,7 +372,7 @@ async def notify_blocked(app: Application, pane_id: str, agent: str, project: st
 async def relay_listener(app: Application):
     """Persistent WebSocket connection to relay."""
     import websockets
-    global agents, relay_connected
+    global agents, relay_connected, prev_statuses
 
     while True:
         try:
@@ -350,7 +386,26 @@ async def relay_listener(app: Application):
                         continue
 
                     if msg.get("type") == "agents":
-                        agents = msg.get("agents", [])
+                        new_agents = msg.get("agents", [])
+                        # Detect status transitions
+                        if CHAT_ID:
+                            for a in new_agents:
+                                pid = a["pane_id"]
+                                new_status = a.get("status", "unknown")
+                                old_status = prev_statuses.get(pid)
+                                if old_status and old_status != new_status:
+                                    # Notify on working/blocked -> idle (agent finished)
+                                    if new_status == "idle" and old_status in ("working", "blocked"):
+                                        try:
+                                            await app.bot.send_message(
+                                                chat_id=int(CHAT_ID),
+                                                text=f"{a['project']} ({a['agent']}) finished."
+                                            )
+                                        except Exception:
+                                            pass
+                                prev_statuses[pid] = new_status
+                        agents = new_agents
+
                     elif msg.get("type") == "blocked":
                         await notify_blocked(
                             app,
@@ -375,6 +430,7 @@ def main():
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("read", cmd_read))
     app.add_handler(CommandHandler("send", cmd_send))
+    app.add_handler(CommandHandler("trust", cmd_trust))
     app.add_handler(CommandHandler("interrupt", cmd_interrupt))
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
