@@ -18,7 +18,7 @@ herdr plugin install dcolinmorgan/herdr-push
 - **Terminal TUI** — kanban dashboard in a herdr pane
 - **11 themes** — dark, herdr, light, sand, clay, dune, nord, rose, dracula, kanagawa, midnight
 - **Token auth** — shared secret protects your relay
-- **Zero-dep plugin** — `herdr-push` uses only `curl`, nothing to install
+- **Zero-dep plugin** — [`herdr-push`](https://github.com/dcolinmorgan/herdr-push) uses only `curl`, nothing to install
 
 ## Screenshots
 
