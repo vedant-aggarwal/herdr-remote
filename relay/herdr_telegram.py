@@ -24,6 +24,7 @@ if not TOKEN:
 pending: dict[int, str] = {}  # message_id -> pane_id
 agents: list[dict] = []       # current agent list from relay
 relay_connected = False
+send_target: str = ""         # pane_id for next free-text message (set by /send picker)
 
 
 # --- Relay communication ---
@@ -67,9 +68,10 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/agents — list all agents\n"
         "/status — relay connection info\n"
         "/read — read last output from an agent\n"
+        "/send — send text to an agent\n"
         "/interrupt — send Ctrl+C to an agent\n\n"
-        f"Chat ID: `{update.effective_chat.id}`",
-        parse_mode="Markdown"
+        "Reply to any /read or /send message to send text to that agent.\n\n"
+        f"Chat ID: {update.effective_chat.id}"
     )
 
 
@@ -143,7 +145,9 @@ async def cmd_read(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     content = await read_pane(match["pane_id"])
     if len(content) > 3500:
         content = content[-3500:]
-    await update.message.reply_text(f"{match['project']}:\n\n{content}")
+    msg = await update.message.reply_text(f"{match['project']}:\n\n{content}")
+    # Store pane_id so user can reply to this message to send text
+    pending[msg.message_id] = match["pane_id"]
 
 
 async def cmd_interrupt(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -174,7 +178,43 @@ async def cmd_interrupt(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     try:
         async with websockets.connect(RELAY_WS) as ws:
             await ws.send(json.dumps({"type": "send_keys", "pane_id": match["pane_id"], "keys": ["Ctrl+c"]}))
-        await update.message.reply_text(f"Sent Ctrl+C to `{match['project']}`", parse_mode="Markdown")
+        await update.message.reply_text(f"Sent Ctrl+C to {match['project']}")
+    except Exception as e:
+        await update.message.reply_text(f"Failed: {e}")
+
+
+async def cmd_send(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Handle /send [project] [text] — send text + Enter to a pane."""
+    args = ctx.args
+    if not args:
+        if not agents:
+            await update.message.reply_text("No agents.")
+            return
+        keyboard = [[InlineKeyboardButton(
+            f"{a['project']} ({a['agent']})",
+            callback_data=json.dumps({"action": "select_send", "pane_id": a["pane_id"]})
+        )] for a in agents[:8]]
+        await update.message.reply_text("Send to which agent?\n(After selecting, reply with your text)", reply_markup=InlineKeyboardMarkup(keyboard))
+        return
+
+    query = args[0].lower()
+    match = next((a for a in agents if query in a.get("project", "").lower() or query in a.get("agent", "").lower()), None)
+    if not match:
+        await update.message.reply_text(f"No agent matching '{query}'. Use /agents to see list.")
+        return
+
+    text = " ".join(args[1:])
+    if not text:
+        msg = await update.message.reply_text(f"Selected {match['project']}. Reply to this message with text to send.")
+        pending[msg.message_id] = match["pane_id"]
+        return
+
+    import websockets
+    try:
+        async with websockets.connect(RELAY_WS) as ws:
+            await ws.send(json.dumps({"type": "send_text", "pane_id": match["pane_id"], "text": text}))
+            await ws.send(json.dumps({"type": "send_keys", "pane_id": match["pane_id"], "keys": ["Enter"]}))
+        await update.message.reply_text(f"Sent to {match['project']}: {text}")
     except Exception as e:
         await update.message.reply_text(f"Failed: {e}")
 
@@ -193,7 +233,8 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         content = await read_pane(data["pane_id"])
         if len(content) > 3500:
             content = content[-3500:]
-        await query.message.reply_text(f"```\n{content}\n```", parse_mode="Markdown")
+        msg = await query.message.reply_text(f"{content}")
+        pending[msg.message_id] = data["pane_id"]
         return
 
     if action == "interrupt":
@@ -204,6 +245,13 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text("Sent Ctrl+C")
         except Exception as e:
             await query.message.reply_text(f"Failed: {e}")
+        return
+
+    if action == "select_send":
+        global send_target
+        send_target = data["pane_id"]
+        agent_name = next((a['project'] for a in agents if a['pane_id'] == data['pane_id']), '?')
+        await query.message.reply_text(f"Ready. Type your message — it will be sent to {agent_name}.")
         return
 
     # Default: respond to blocked agent
@@ -217,16 +265,29 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 # --- Free text reply ---
 
 async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """Reply to a blocked notification to send custom text."""
-    if not update.message.reply_to_message:
-        return
-    orig_id = update.message.reply_to_message.message_id
-    pane_id = pending.get(orig_id)
+    """Send text to an agent. Uses send_target if set, or reply-to-message."""
+    global send_target
+    
+    # Check if there's an active send target (from /send picker)
+    pane_id = None
+    if send_target:
+        pane_id = send_target
+        send_target = ""  # one-shot
+    elif update.message.reply_to_message:
+        orig_id = update.message.reply_to_message.message_id
+        pane_id = pending.get(orig_id)
+    
     if not pane_id:
-        await update.message.reply_text("Reply to a blocked notification to send text to that agent.")
-        return
-    await send_to_relay(pane_id, update.message.text)
-    await update.message.reply_text("Sent")
+        return  # Not a reply and no send target — ignore
+
+    import websockets
+    try:
+        async with websockets.connect(RELAY_WS) as ws:
+            await ws.send(json.dumps({"type": "send_text", "pane_id": pane_id, "text": update.message.text}))
+            await ws.send(json.dumps({"type": "send_keys", "pane_id": pane_id, "keys": ["Enter"]}))
+        await update.message.reply_text("Sent")
+    except Exception as e:
+        await update.message.reply_text(f"Failed: {e}")
 
 
 # --- Blocked notification ---
@@ -313,6 +374,7 @@ def main():
     app.add_handler(CommandHandler("agents", cmd_agents))
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("read", cmd_read))
+    app.add_handler(CommandHandler("send", cmd_send))
     app.add_handler(CommandHandler("interrupt", cmd_interrupt))
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
