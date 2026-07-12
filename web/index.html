@@ -257,7 +257,8 @@ function saveAndConnect() {
 
 // Connection
 function connect() {
-  let url = localStorage.getItem('herdr_relay_url');
+  // Fall back to the origin that served this page — the relay serves it, so it IS the relay.
+  let url = localStorage.getItem('herdr_relay_url') || DEFAULT_RELAY;
   if (!url) { showSetup(); return; }
   if (ws) ws.close();
   setStatus('connecting');
