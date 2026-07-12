@@ -142,11 +142,11 @@ body { font-family: -apple-system, system-ui, sans-serif; background: var(--bg);
   <h2>Settings</h2>
   <div class="setting-group">
     <label>Relay URL</label>
-    <input id="relayUrl" type="url" placeholder="wss://your-tunnel.trycloudflare.com" />
+    <input id="relayUrl" type="url" placeholder="auto — this relay" />
     <label style="margin-top:8px">Token (optional)</label>
-    <input id="relayToken" type="password" placeholder="shared secret" />
+    <input id="relayToken" type="password" placeholder="none" />
     <button onclick="saveAndConnect()">Connect</button>
-    <div class="hint">Run <code>./relay/start.sh</code> to get a URL. <a href="https://github.com/dcolinmorgan/herdr-remote/blob/main/QUICKSTART.md" style="color:var(--blue)">Setup guide →</a></div>
+    <div class="hint">Defaults to the relay that served this page. Only change it to reach a different machine.</div>
   </div>
   <div class="setting-group">
     <label>Theme</label>
@@ -205,8 +205,13 @@ const THEMES = ['dark','herdr','light','sand','clay','dune','nord','rose','dracu
 let ws = null, agents = [], activePane = null, refreshInterval = null;
 
 // Settings
-const DEFAULT_RELAY = 'wss://your-relay.example.com';
-const DEFAULT_TOKEN = 'YOUR_TOKEN_HERE';
+// The relay serves this page, so by default talk back to whoever served it.
+// Override in ⚙ only to point at a different machine's relay.
+const SAME_ORIGIN = location.protocol.startsWith('http')
+  ? (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host
+  : '';
+const DEFAULT_RELAY = SAME_ORIGIN;
+const DEFAULT_TOKEN = '';
 const savedUrl = localStorage.getItem('herdr_relay_url') || DEFAULT_RELAY;
 const savedTheme = localStorage.getItem('herdr_theme') || 'dark';
 const savedToken = localStorage.getItem('herdr_relay_token') || DEFAULT_TOKEN;
@@ -276,13 +281,14 @@ function showSetup() {
   document.getElementById('agents').innerHTML = `<div class="empty">
     <p style="font-size:1.5rem;margin-bottom:12px">🐑</p>
     <p><strong>Welcome to herdr-remote</strong></p>
-    <p style="margin-top:8px">Tap ⚙ to enter your relay URL</p>
-    <p style="margin-top:12px;font-size:0.7rem;color:var(--muted)">Need a URL? Run on your Mac:<br><code>cloudflared tunnel --url http://localhost:8375</code></p>
+    <p style="margin-top:8px">No relay reachable from this page.</p>
+    <p style="margin-top:12px;font-size:0.7rem;color:var(--muted)">Start it on your PC:<br><code>.\\relay\\start.ps1</code></p>
   </div>`;
 }
 
 function handleMessage(msg) {
-  if (msg.type === 'agents') { agents = msg.agents; render(); }
+  if (msg.type === 'reload') { location.reload(); }
+  else if (msg.type === 'agents') { agents = msg.agents; render(); }
   else if (msg.type === 'blocked') {
     const a = agents.find(x => x.pane_id === msg.pane_id);
     if (a) { a.status='blocked'; a.prompt=msg.prompt; a.options=msg.options; }

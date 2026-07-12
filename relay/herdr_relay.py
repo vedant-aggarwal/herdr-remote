@@ -3,18 +3,27 @@
 # requires-python = ">=3.10"
 # dependencies = ["websockets>=14.0", "zeroconf>=0.80.0"]
 # ///
-"""herdr-remote relay — polls herdr, accepts push events (HTTP POST + WebSocket + UDP), broadcasts to clients."""
-import asyncio, json, os, re, signal, socket, subprocess
+"""herdr-remote relay — polls herdr, accepts push events (HTTP POST + WebSocket + UDP), broadcasts to clients.
+
+Also serves the web UI from disk so the page and the WebSocket share one origin,
+and hot-reloads connected clients when that file changes (HERDR_DEV=1).
+"""
+import asyncio, json, mimetypes, os, pathlib, re, shutil, signal, socket, subprocess
 
 try:
     from websockets.asyncio.server import serve
 except ImportError:
     from websockets.server import serve
 
-HERDR = os.environ.get("HERDR_BIN", "/opt/homebrew/bin/herdr")
+HERDR = os.environ.get("HERDR_BIN") or shutil.which("herdr") or "/opt/homebrew/bin/herdr"
+WS_HOST = os.environ.get("HERDR_RELAY_HOST", "127.0.0.1")
 WS_PORT = int(os.environ.get("HERDR_RELAY_PORT", "8375"))
 POLL_INTERVAL = 2
 AUTH_TOKEN = os.environ.get("HERDR_RELAY_TOKEN", "")  # Optional: shared secret for relay auth
+
+# Web UI served straight from disk — edit the file, refresh, done. No build step.
+WEB_DIR = pathlib.Path(os.environ.get("HERDR_WEB_DIR") or pathlib.Path(__file__).parent.parent / "web").resolve()
+DEV = os.environ.get("HERDR_DEV") == "1"  # watch WEB_DIR and push a reload to clients on change
 
 # Remote hosts: comma-separated SSH targets
 REMOTES = [r.strip() for r in os.environ.get("HERDR_REMOTES", "").split(",") if r.strip()]
@@ -41,9 +50,15 @@ def run_herdr(*args, remote=None):
             cmd = ["ssh", "-o", "ConnectTimeout=5", "-o", "BatchMode=yes", remote, HERDR, *args]
         else:
             cmd = [HERDR, *args]
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        # Decode as UTF-8 explicitly: `text=True` alone uses the locale codec, which on
+        # Windows is cp1252 and blows up on the box-drawing glyphs `pane read` emits.
+        r = subprocess.run(
+            cmd, capture_output=True, timeout=15,
+            encoding="utf-8", errors="replace",
+        )
         return r.stdout.strip()
-    except Exception:
+    except Exception as e:
+        print(f"herdr {' '.join(args)} failed: {e!r}")
         return ""
 
 
@@ -76,8 +91,21 @@ def get_all_agents():
     return agents
 
 
+def raw_pane_read(pane_id, lines=20, remote=None):
+    """Read a pane, preferring scrollback but falling back to the viewport.
+
+    `--source recent` is scrollback only, so a pane that hasn't scrolled yet reads back
+    empty — which is exactly the case for a freshly spawned shell. Fall back to `visible`
+    so new panes aren't blank on the client.
+    """
+    raw = run_herdr("pane", "read", pane_id, "--lines", str(lines), "--source", "recent", remote=remote)
+    if not raw.strip():
+        raw = run_herdr("pane", "read", pane_id, "--lines", str(lines), "--source", "visible", remote=remote)
+    return raw
+
+
 def read_pane(pane_id, remote=None):
-    raw = run_herdr("pane", "read", pane_id, "--lines", "20", "--source", "recent", remote=remote)
+    raw = raw_pane_read(pane_id, 20, remote=remote)
     lines = [l for l in raw.splitlines() if l.strip() and not CHROME_RE.search(l)]
     return "\n".join(lines[-6:])
 
@@ -100,6 +128,35 @@ async def broadcast(msg):
         except Exception:
             dead.add(ws)
     clients.difference_update(dead)
+
+
+def serve_static(path):
+    """Return (status, content_type, body) for a web-UI path, or None if there's no such file."""
+    rel = (path or "/").split("?", 1)[0].lstrip("/") or "index.html"
+    target = (WEB_DIR / rel).resolve()
+    # Refuse anything that escapes WEB_DIR (../../etc).
+    if not target.is_relative_to(WEB_DIR) or not target.is_file():
+        return None
+    ctype = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+    return 200, ctype, target.read_bytes()
+
+
+async def watch_web():
+    """Hot-reload: when a file under WEB_DIR changes, tell every client to reload."""
+    def snapshot():
+        return {p: p.stat().st_mtime_ns for p in WEB_DIR.rglob("*") if p.is_file()}
+
+    last = snapshot()
+    while True:
+        await asyncio.sleep(1)
+        try:
+            current = snapshot()
+        except OSError:
+            continue
+        if current != last:
+            last = current
+            print("web changed → reloading clients")
+            await broadcast({"type": "reload"})
 
 
 async def poll_loop():
@@ -212,9 +269,23 @@ async def process_request(connection, request):
                 event_queue.put_nowait(event)
             except Exception:
                 pass
+            headers = Headers([("Access-Control-Allow-Origin", "*")])
+            return Response(200, "OK", headers, b"ok\n")
 
-    headers = Headers([("Access-Control-Allow-Origin", "*")])
-    return Response(200, "OK", headers, b"ok\n")
+    # Otherwise serve the web UI from disk. Read fresh every request so an edit
+    # to index.html shows up on the next refresh with no build and no deploy.
+    static = serve_static(request.path)
+    if static:
+        status, ctype, body = static
+        headers = Headers([
+            ("Content-Type", ctype),
+            ("Content-Length", str(len(body))),
+            ("Cache-Control", "no-store"),
+        ])
+        return Response(status, "OK", headers, body)
+
+    headers = Headers([("Content-Type", "text/plain"), ("Content-Length", "10")])
+    return Response(404, "Not Found", headers, b"not found\n")
 
 
 async def handle_client(ws):
@@ -236,7 +307,7 @@ async def handle_client(ws):
                 pane_id = msg["pane_id"]
                 lines = msg.get("lines", "30")
                 remote = pane_remote_map.get(pane_id)
-                content = run_herdr("pane", "read", pane_id, "--lines", str(lines), "--source", "recent", remote=remote)
+                content = raw_pane_read(pane_id, lines, remote=remote)
                 await ws.send(json.dumps({"type": "pane_content", "pane_id": pane_id, "content": content}))
             elif msg_type == "send_keys":
                 pane_id = msg["pane_id"]
@@ -288,13 +359,26 @@ async def main():
         print("UDP 8376 in use, plugin push disabled")
     asyncio.create_task(poll_loop())
     asyncio.create_task(event_push())
-    server = await serve(handle_client, "0.0.0.0", WS_PORT, process_request=process_request)
+    if DEV:
+        asyncio.create_task(watch_web())
+    server = await serve(handle_client, WS_HOST, WS_PORT, process_request=process_request)
     hosts = ["local"] + REMOTES
-    print(f"herdr-remote relay on :{WS_PORT} (WebSocket + HTTP POST)")
+    print(f"herdr-remote relay on {WS_HOST}:{WS_PORT} (WebSocket + HTTP + web UI)")
+    print(f"  herdr:   {HERDR}")
+    print(f"  web:     {WEB_DIR}{' (live-reload on)' if DEV else ''}")
     print(f"  polling: {', '.join(hosts)}")
     stop = loop.create_future()
+
+    def _stop(*_):
+        if not stop.done():
+            stop.set_result(None)
+
     for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, stop.set_result, None)
+        # Windows' asyncio loop has no add_signal_handler; fall back to the plain handler.
+        try:
+            loop.add_signal_handler(sig, _stop)
+        except NotImplementedError:
+            signal.signal(sig, _stop)
     await stop
     server.close()
     if zc and info:
